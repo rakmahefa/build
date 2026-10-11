@@ -1,17 +1,21 @@
 {
-  "version": 1,
+  "version": 2,
   "platforms": {
     "android": {
       "enabled": true
     },
     "linux": {
-      "enabled": true
+      "enabled": false,
+      "reason": "Builder not implemented"
     },
     "windows": {
-      "enabled": true
+      "enabled": false,
+      "reason": "Builder not implemented"
     }
   },
   "artifacts": {
-    "directory": "output"
+    "directory": "output",
+    "includeBuildLog": true,
+    "includeBuildMetadata": true
   }
 }

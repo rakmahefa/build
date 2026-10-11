@@ -1,38 +1,37 @@
 # Build Engine
 
-Remote build infrastructure for the mobile Vibe Coding environment.
+Reusable GitHub Actions workflow and scripts for remote builds requested by NyVibeDroid.
 
-## Goal
+## Current support
 
-This repository provides GitHub Actions workflows and build scripts used to compile projects remotely from an Android development client.
+| Target | Status | Output |
+| --- | --- | --- |
+| Android Gradle app | Enabled | Debug and release APKs, build log, metadata |
+| Linux | Disabled | Builder not implemented |
+| Windows | Disabled | Builder not implemented |
 
-## Architecture
+The workflow only offers targets that are implemented. Unsupported targets fail explicitly rather than reporting a successful build without producing a binary.
 
-```
-Android Client
-      |
-      v
-GitHub Actions
-      |
-      v
-Build Runner
-      |
-      v
-Artifacts + Logs
-```
+## Run a remote build
 
-## Supported Targets
+1. Open **Actions → Remote Build Engine → Run workflow**.
+2. Enter the target GitHub repository in `owner/name` format.
+3. Enter the branch, tag, or commit ref.
+4. Select **android** and run the workflow.
+5. Download the `build-android` artifact, which contains APKs under `apks/`, the build log, build metadata, and any collected project logs.
 
-- Android
-- Linux
-- Windows
+The target must be an Android Gradle project with `settings.gradle(.kts)` and an application module at `app/build.gradle(.kts)`. The runner uses JDK 17 and Gradle 8.9 when the target has no Gradle Wrapper; an existing project wrapper is preferred.
 
-## Repository Rules
+Public target repositories work with the default workflow token. For private target repositories, add a read-only `BUILD_TARGET_TOKEN` Actions secret to this repository. The token must have contents-read access to the target repository.
 
-This repository contains only:
+## Workflow guarantees
 
-- CI/CD workflows
-- Build scripts
-- Build documentation
+- Runs tests before assembling debug and release APKs.
+- Fails if project configuration fails or no APK is produced.
+- Preserves build logs and metadata even when the build fails.
+- Uploads diagnostics as a GitHub Actions artifact on success or failure.
+- Does not silently claim Linux or Windows support before those build pipelines are implemented.
 
-It does not contain application source code.
+## Repository rules
+
+This repository contains only build workflows, scripts, configuration, and documentation. Application source belongs in the target project repository.
