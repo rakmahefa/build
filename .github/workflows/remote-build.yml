@@ -1,0 +1,46 @@
+name: Remote Build Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Target repository to build
+        required: true
+      branch:
+        description: Target branch
+        required: false
+        default: main
+      platform:
+        description: Build platform
+        required: true
+        type: choice
+        options:
+          - android
+          - linux
+          - windows
+
+jobs:
+  build:
+    name: Build project
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout build engine
+        uses: actions/checkout@v5
+
+      - name: Prepare environment
+        run: |
+          echo "Preparing build environment"
+
+      - name: Build
+        run: |
+          echo "Building ${{ inputs.repository }}"
+          echo "Platform: ${{ inputs.platform }}"
+          echo "Branch: ${{ inputs.branch }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: build-output
+          path: output/
+          if-no-files-found: ignore
