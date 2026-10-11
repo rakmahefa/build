@@ -100,12 +100,12 @@ jobs:
           {
             echo "## Remote build result"
             echo
-            printf -- '- Repository: `%s`\n' "$TARGET_REPOSITORY"
-            printf -- '- Ref: `%s`\n' "$TARGET_REF"
-            printf -- '- Commit: `%s`\n' "$target_commit"
-            printf -- '- Platform: `%s`\n' "$TARGET_PLATFORM"
-            printf -- '- Build step: `%s`\n' "$build_outcome"
-            echo "- APKs and logs are attached as the `build-android` workflow artifact."
+            printf -- '- Repository: %s\n' "$TARGET_REPOSITORY"
+            printf -- '- Ref: %s\n' "$TARGET_REF"
+            printf -- '- Commit: %s\n' "$target_commit"
+            printf -- '- Platform: %s\n' "$TARGET_PLATFORM"
+            printf -- '- Build step: %s\n' "$build_outcome"
+            echo "- APKs and logs are attached as the build-android workflow artifact."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APKs, logs, and build metadata
