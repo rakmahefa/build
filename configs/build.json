@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "platforms": {
+    "android": {
+      "enabled": true
+    },
+    "linux": {
+      "enabled": true
+    },
+    "windows": {
+      "enabled": true
+    }
+  },
+  "artifacts": {
+    "directory": "output"
+  }
+}
