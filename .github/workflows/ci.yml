@@ -1,0 +1,55 @@
+name: Build Engine CI
+
+on:
+  push:
+    branches:
+      - main
+      - agent
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate workflows and build scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Check shell syntax
+        run: |
+          bash -n scripts/common/setup.sh
+          bash -n scripts/common/artifacts.sh
+          bash -n scripts/android/build.sh
+          bash -n scripts/linux/build.sh
+          bash -n scripts/windows/build.sh
+
+      - name: Validate build configuration
+        run: python3 -m json.tool configs/build.json > /dev/null
+
+      - name: Ensure unsupported targets fail explicitly
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in linux windows; do
+            log_file="$(mktemp)"
+            set +e
+            bash "scripts/${target}/build.sh" > "$log_file" 2>&1
+            status=$?
+            set -e
+            if [[ "$status" -ne 64 ]]; then
+              cat "$log_file"
+              echo "Expected scripts/${target}/build.sh to fail with exit code 64, got $status." >&2
+              rm -f "$log_file"
+              exit 1
+            fi
+            grep -q "not implemented yet" "$log_file"
+            rm -f "$log_file"
+          done
