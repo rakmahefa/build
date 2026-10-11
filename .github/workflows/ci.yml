@@ -101,7 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x scripts/android/build.sh
-          ./scripts/android/build.sh target
+          ./scripts/android/build.sh target 2>&1 | tee output/engine-run.log
 
       - name: Upload integration APKs and logs
         if: always()
