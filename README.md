@@ -18,7 +18,7 @@ The workflow only offers targets that are implemented. Unsupported targets fail 
 2. Enter the target GitHub repository in `owner/name` format.
 3. Enter the branch, tag, or commit ref.
 4. Select **android** and run the workflow.
-5. Download the `build-android` artifact, which contains APKs under `apks/`, the build log, build metadata, and any collected project logs.
+5. Download the `build-android` artifact, which contains APKs under `apks/`, `build.log`, the complete `engine-run.log`, build metadata, and any collected project logs.
 
 The target must be an Android Gradle project with `settings.gradle(.kts)` and an application module at `app/build.gradle(.kts)`. The runner uses JDK 17 and Gradle 8.9 when the target has no Gradle Wrapper; an existing project wrapper is preferred.
 
