@@ -3,15 +3,27 @@ name: Remote Build Engine
 on:
   workflow_dispatch:
     inputs:
-      repository:
-        description: Target GitHub repository in owner/name format
+      source_mode:
+        description: Build a GitHub ref or an uploaded workspace archive
         required: true
+        type: choice
+        default: repository
+        options:
+          - repository
+          - workspace_archive
+      repository:
+        description: Target GitHub repository in owner/name format (repository mode)
+        required: false
         type: string
       branch:
-        description: Branch, tag, or commit to build
-        required: true
+        description: Branch, tag, or commit to build (repository mode)
+        required: false
         type: string
         default: main
+      archive_release_id:
+        description: Temporary release ID containing workspace.zip (archive mode)
+        required: false
+        type: string
       platform:
         description: Build target (only implemented targets are offered)
         required: true
@@ -25,7 +37,7 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ inputs.repository }} (Android)
+    name: Build Android (${{ inputs.source_mode }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -36,8 +48,40 @@ jobs:
       - name: Initialize artifact directory
         run: mkdir -p output/logs output/apks
 
+      - name: Validate build source
+        shell: bash
+        env:
+          SOURCE_MODE: ${{ inputs.source_mode }}
+          TARGET_REPOSITORY: ${{ inputs.repository }}
+          TARGET_REF: ${{ inputs.branch }}
+          ARCHIVE_RELEASE_ID: ${{ inputs.archive_release_id }}
+        run: |
+          set -euo pipefail
+          case "$SOURCE_MODE" in
+            repository)
+              [[ "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
+                echo "Repository mode requires owner/name." >&2
+                exit 2
+              }
+              [[ -n "$TARGET_REF" ]] || {
+                echo "Repository mode requires a branch, tag, or commit." >&2
+                exit 2
+              }
+              ;;
+            workspace_archive)
+              [[ "$ARCHIVE_RELEASE_ID" =~ ^[0-9]+$ ]] || {
+                echo "Workspace archive mode requires a numeric temporary release ID." >&2
+                exit 2
+              }
+              ;;
+            *)
+              echo "Unsupported source mode: $SOURCE_MODE" >&2
+              exit 2
+              ;;
+          esac
+
       - name: Checkout target project
-        id: target
+        if: ${{ inputs.source_mode == 'repository' }}
         uses: actions/checkout@v7
         with:
           repository: ${{ inputs.repository }}
@@ -45,6 +89,61 @@ jobs:
           path: target
           token: ${{ secrets.BUILD_TARGET_TOKEN || github.token }}
           fetch-depth: 1
+
+      - name: Download and safely extract workspace archive
+        if: ${{ inputs.source_mode == 'workspace_archive' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_RELEASE_ID: ${{ inputs.archive_release_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p target
+          release_json="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$ARCHIVE_RELEASE_ID")"
+          asset_url="$(python3 -c 'import json,sys; j=json.load(sys.stdin); print(next((a["url"] for a in j.get("assets",[]) if a.get("name")=="workspace.zip"), ""))' <<< "$release_json")"
+          if [[ -z "$asset_url" ]]; then
+            echo "The temporary release does not contain workspace.zip." >&2
+            exit 2
+          fi
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$asset_url" -o "$RUNNER_TEMP/workspace.zip"
+          python3 - "$RUNNER_TEMP/workspace.zip" target <<'PY'
+          import pathlib
+          import stat
+          import sys
+          import zipfile
+
+          archive = pathlib.Path(sys.argv[1])
+          destination = pathlib.Path(sys.argv[2]).resolve()
+          max_files = 100_000
+          max_unpacked_bytes = 2 * 1024 * 1024 * 1024
+
+          with zipfile.ZipFile(archive) as zf:
+              infos = zf.infolist()
+              if len(infos) > max_files:
+                  raise SystemExit("Workspace archive contains too many files.")
+              total = 0
+              for info in infos:
+                  entry = pathlib.PurePosixPath(info.filename)
+                  if entry.is_absolute() or ".." in entry.parts or not entry.parts:
+                      raise SystemExit("Unsafe path in workspace archive.")
+                  if (info.external_attr >> 16) & 0o170000 == stat.S_IFLNK:
+                      raise SystemExit("Symlinks are not accepted in workspace archives.")
+                  total += info.file_size
+                  if total > max_unpacked_bytes:
+                      raise SystemExit("Workspace archive exceeds the 2 GiB unpacked size limit.")
+                  target_path = (destination / pathlib.Path(*entry.parts)).resolve()
+                  if target_path != destination and destination not in target_path.parents:
+                      raise SystemExit("Workspace archive path escapes its destination.")
+              zf.extractall(destination)
+          PY
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6
@@ -76,8 +175,10 @@ jobs:
       - name: Write build metadata
         if: always()
         env:
+          SOURCE_MODE: ${{ inputs.source_mode }}
           TARGET_REPOSITORY: ${{ inputs.repository }}
           TARGET_REF: ${{ inputs.branch }}
+          ARCHIVE_RELEASE_ID: ${{ inputs.archive_release_id }}
           TARGET_PLATFORM: ${{ inputs.platform }}
           BUILD_OUTCOME: ${{ steps.run-build.outcome }}
         shell: bash
@@ -85,13 +186,18 @@ jobs:
           set -euo pipefail
           mkdir -p output
           target_commit="unavailable"
-          if git -C target rev-parse HEAD >/dev/null 2>&1; then
+          if [[ "$SOURCE_MODE" == "repository" ]] && git -C target rev-parse HEAD >/dev/null 2>&1; then
             target_commit="$(git -C target rev-parse HEAD)"
+          elif [[ "$SOURCE_MODE" == "workspace_archive" ]]; then
+            target_commit="uploaded-workspace-archive"
           fi
-          build_outcome="${BUILD_OUTCOME:-not-run}"
+          build_outcome="not-run"
+          if [[ -n "$BUILD_OUTCOME" ]]; then build_outcome="$BUILD_OUTCOME"; fi
           {
+            printf 'source_mode=%s\n' "$SOURCE_MODE"
             printf 'repository=%s\n' "$TARGET_REPOSITORY"
             printf 'ref=%s\n' "$TARGET_REF"
+            printf 'archive_release_id=%s\n' "$ARCHIVE_RELEASE_ID"
             printf 'commit=%s\n' "$target_commit"
             printf 'platform=%s\n' "$TARGET_PLATFORM"
             printf 'outcome=%s\n' "$build_outcome"
@@ -100,6 +206,7 @@ jobs:
           {
             echo "## Remote build result"
             echo
+            printf -- '- Source mode: %s\n' "$SOURCE_MODE"
             printf -- '- Repository: %s\n' "$TARGET_REPOSITORY"
             printf -- '- Ref: %s\n' "$TARGET_REF"
             printf -- '- Commit: %s\n' "$target_commit"
