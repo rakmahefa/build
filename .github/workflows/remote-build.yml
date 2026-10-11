@@ -28,19 +28,31 @@ jobs:
       - name: Checkout build engine
         uses: actions/checkout@v5
 
+      - name: Checkout target project
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.branch }}
+          path: target
+
       - name: Prepare environment
         run: |
-          echo "Preparing build environment"
+          chmod +x scripts/common/setup.sh
+          ./scripts/common/setup.sh
 
-      - name: Build
+      - name: Run build
         run: |
-          echo "Building ${{ inputs.repository }}"
-          echo "Platform: ${{ inputs.platform }}"
-          echo "Branch: ${{ inputs.branch }}"
+          chmod +x scripts/${{ inputs.platform }}/build.sh
+          ./scripts/${{ inputs.platform }}/build.sh target
+
+      - name: Collect artifacts
+        run: |
+          chmod +x scripts/common/artifacts.sh
+          ./scripts/common/artifacts.sh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: build-output
+          name: build-${{ inputs.platform }}
           path: output/
-          if-no-files-found: ignore
+          if-no-files-found: warn
