@@ -31,7 +31,8 @@ A checked-in Gradle Wrapper is preferred and used when present.
 The `build-android` Actions artifact includes:
 
 - `apks/`: all generated APKs, preserving their project output paths
-- `build.log`: complete Gradle build output
+- `build.log`: Gradle output captured by the Android builder
+- `engine-run.log`: complete Android builder stdout/stderr, including validation failures before Gradle starts
 - `logs/`: additional project logs, when available
 - `build-metadata.txt`: repository, requested ref, resolved commit, platform, job outcome, and workflow URL
 
