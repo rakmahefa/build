@@ -16,13 +16,15 @@ The workflow only offers targets that are implemented. Unsupported targets fail 
 
 The NyVibeDroid Android app includes a **Remote Build** screen that triggers this repository's Remote Build Engine workflow, tracks the run, displays logs, and downloads the debug APK to the phone.
 
-1. Create a fine-grained GitHub personal access token for this repository.
-2. Grant the token **Actions: Read and write** permission on this Build Engine repository. Keep it private.
+1. Create a fine-grained GitHub personal access token for this Build Engine repository.
+2. Grant **Actions: Read and write** for GitHub-ref builds. To use **Workspace ZIP**, also grant **Contents: Read and write** on this Build Engine repository so the app can upload and remove a temporary private draft release.
 3. In NyVibeDroid, enter and validate the token. The app encrypts it using Android Keystore on the device.
-4. Select the target repository in owner/name format and a branch, tag, or commit.
+4. Choose **Workspace ZIP** to compile the active Workspace's current files without committing or pushing them to a branch, or choose **Branche GitHub** to build a repository/ref as before.
 5. Start the Android build, then inspect the run/logs or download the debug APK from within the app.
 
-For a private target repository, also create a read-only BUILD_TARGET_TOKEN Actions secret in this repository, with Contents: read access to the target project. The app token is used for the GitHub Actions API and is not passed to the target project's build process.
+Workspace ZIPs are uploaded as assets of temporary draft releases in this private Build Engine repository. The app removes the release/tag when the workflow completes; a scheduled cleanup workflow removes abandoned temporary uploads older than 24 hours. The generated archive excludes Git metadata, common build caches, local.properties, local .env files (except examples), and common private-key formats. Archive limits are 512 MiB of source files and 200 MiB compressed. Review the project's files before uploading and configure build secrets separately rather than including credentials in source files.
+
+For a private target repository in **GitHub-ref mode**, also create a read-only BUILD_TARGET_TOKEN Actions secret in this repository, with Contents: read access to the target project. The app token is used for the GitHub Actions API and Workspace ZIP upload; it is not passed to the target project's build process.
 
 The app currently supports Android Gradle builds only; Linux and Windows remain disabled until their builders can produce real, verified binaries.
 

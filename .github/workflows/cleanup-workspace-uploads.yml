@@ -1,0 +1,52 @@
+name: Clean up temporary workspace uploads
+
+on:
+  schedule:
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Remove expired workspace ZIP releases
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Find and remove expired temporary releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          releases_json="$RUNNER_TEMP/releases.json"
+          gh api --paginate --slurp "repos/$GH_REPOSITORY/releases?per_page=100" > "$releases_json"
+          cutoff="$(date -u -d '24 hours ago' +%s)"
+          while IFS=$'\t' read -r release_id tag_name; do
+            [[ -n "$release_id" && -n "$tag_name" ]] || continue
+            echo "Deleting expired temporary workspace release $release_id ($tag_name)"
+            gh api --method DELETE "repos/$GH_REPOSITORY/releases/$release_id"
+            gh api --method DELETE "repos/$GH_REPOSITORY/git/refs/tags/$tag_name" || true
+          done < <(
+            python3 - "$releases_json" "$cutoff" <<'PY'
+          import datetime
+          import json
+          import sys
+
+          path, cutoff = sys.argv[1], int(sys.argv[2])
+          with open(path, encoding="utf-8") as handle:
+              pages = json.load(handle)
+          releases = [item for page in pages for item in (page if isinstance(page, list) else [page])]
+          for release in releases:
+              tag = release.get("tag_name", "")
+              created = release.get("created_at", "")
+              try:
+                  timestamp = int(datetime.datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp())
+              except (TypeError, ValueError):
+                  continue
+              if release.get("draft") and tag.startswith("nyvibe-workspace-") and timestamp < cutoff:
+                  print(f'{release.get("id")}\t{tag}')
+          PY
+          )
