@@ -4,55 +4,115 @@ on:
   workflow_dispatch:
     inputs:
       repository:
-        description: Target repository to build
+        description: Target GitHub repository in owner/name format
         required: true
+        type: string
       branch:
-        description: Target branch
-        required: false
+        description: Branch, tag, or commit to build
+        required: true
+        type: string
         default: main
       platform:
-        description: Build platform
+        description: Build target (only implemented targets are offered)
         required: true
         type: choice
+        default: android
         options:
           - android
-          - linux
-          - windows
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    name: Build project
+    name: Build ${{ inputs.repository }} (Android)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
-      - name: Checkout build engine
-        uses: actions/checkout@v5
+      - name: Checkout Build Engine
+        uses: actions/checkout@v7
+
+      - name: Initialize artifact directory
+        run: mkdir -p output/logs output/apks
 
       - name: Checkout target project
-        uses: actions/checkout@v5
+        id: target
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.repository }}
           ref: ${{ inputs.branch }}
           path: target
+          token: ${{ secrets.BUILD_TARGET_TOKEN || github.token }}
+          fetch-depth: 1
 
-      - name: Prepare environment
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 8.9
+        if: ${{ inputs.platform == 'android' }}
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.9"
+
+      - name: Build Android project
+        id: run-build
+        shell: bash
         run: |
-          chmod +x scripts/common/setup.sh
-          ./scripts/common/setup.sh
+          set -euo pipefail
+          chmod +x scripts/android/build.sh
+          ./scripts/android/build.sh target 2>&1 | tee output/engine-run.log
 
-      - name: Run build
-        run: |
-          chmod +x scripts/${{ inputs.platform }}/build.sh
-          ./scripts/${{ inputs.platform }}/build.sh target
-
-      - name: Collect artifacts
+      - name: Collect logs and project artifacts
+        if: always()
+        shell: bash
         run: |
           chmod +x scripts/common/artifacts.sh
           ./scripts/common/artifacts.sh
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+      - name: Write build metadata
+        if: always()
+        env:
+          TARGET_REPOSITORY: ${{ inputs.repository }}
+          TARGET_REF: ${{ inputs.branch }}
+          TARGET_PLATFORM: ${{ inputs.platform }}
+          BUILD_OUTCOME: ${{ steps.run-build.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          target_commit="unavailable"
+          if git -C target rev-parse HEAD >/dev/null 2>&1; then
+            target_commit="$(git -C target rev-parse HEAD)"
+          fi
+          build_outcome="${BUILD_OUTCOME:-not-run}"
+          {
+            printf 'repository=%s\n' "$TARGET_REPOSITORY"
+            printf 'ref=%s\n' "$TARGET_REF"
+            printf 'commit=%s\n' "$target_commit"
+            printf 'platform=%s\n' "$TARGET_PLATFORM"
+            printf 'outcome=%s\n' "$build_outcome"
+            printf 'run_url=%s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } > output/build-metadata.txt
+          {
+            echo "## Remote build result"
+            echo
+            printf -- '- Repository: %s\n' "$TARGET_REPOSITORY"
+            printf -- '- Ref: %s\n' "$TARGET_REF"
+            printf -- '- Commit: %s\n' "$target_commit"
+            printf -- '- Platform: %s\n' "$TARGET_PLATFORM"
+            printf -- '- Build step: %s\n' "$build_outcome"
+            echo "- APKs and logs are attached as the build-android workflow artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APKs, logs, and build metadata
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          name: build-${{ inputs.platform }}
+          name: build-android
           path: output/
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 14

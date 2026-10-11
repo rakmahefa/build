@@ -1,0 +1,113 @@
+name: Build Engine CI
+
+on:
+  push:
+    branches:
+      - main
+      - agent
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate build scripts and configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Lint GitHub Actions workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="1.7.12"
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz" -o "$archive"
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" .github/workflows/*.yml
+
+      - name: Check shell syntax
+        run: |
+          bash -n scripts/common/setup.sh
+          bash -n scripts/common/artifacts.sh
+          bash -n scripts/android/build.sh
+          bash -n scripts/linux/build.sh
+          bash -n scripts/windows/build.sh
+
+      - name: Validate build configuration
+        run: python3 -m json.tool configs/build.json > /dev/null
+
+      - name: Ensure unsupported targets fail explicitly
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in linux windows; do
+            log_file="$(mktemp)"
+            set +e
+            bash "scripts/${target}/build.sh" > "$log_file" 2>&1
+            status=$?
+            set -e
+            if [[ "$status" -ne 64 ]]; then
+              cat "$log_file"
+              echo "Expected scripts/${target}/build.sh to fail with exit code 64, got $status." >&2
+              rm -f "$log_file"
+              exit 1
+            fi
+            grep -q "not implemented yet" "$log_file"
+            rm -f "$log_file"
+          done
+
+  android-integration:
+    name: Integration test with NyVibeDroid
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout Build Engine
+        uses: actions/checkout@v7
+
+      - name: Initialize artifact directory
+        run: mkdir -p output/logs output/apks
+
+      - name: Checkout NyVibeDroid test project
+        uses: actions/checkout@v7
+        with:
+          repository: rakmahefa/nyvibedroid
+          ref: agent
+          path: target
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.9"
+
+      - name: Run the actual Android builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/android/build.sh
+          ./scripts/android/build.sh target 2>&1 | tee output/engine-run.log
+
+      - name: Upload integration APKs and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-engine-integration-${{ github.sha }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
